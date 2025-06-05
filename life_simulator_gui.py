@@ -1,37 +1,80 @@
-# Файл: life_simulator_gui.py
+# Файл:
 import random
 import tkinter as tk
 
 CELL_SIZE = 20
+WIDTH = 20
+HEIGHT = 20
 
 # === 1. Мир ===
 class World:
-    def __init__(self, width=20, height=20):
-        self.width = width
-        self.height = height
-        self.grid = [[Cell() for _ in range(width)] for _ in range(height)]
+    def __init__(self, canvas, info_text):
+        self.width = WIDTH
+        self.height = HEIGHT
+        self.grid = [[Cell() for _ in range(WIDTH)] for _ in range(HEIGHT)]
         self.entities = []
         self.ticks = 0
+        self.canvas = canvas
+        self.info_text = info_text
+        self.messages = []
 
     def tick(self):
         self.ticks += 1
+        for row in self.grid:
+            for cell in row:
+                if isinstance(cell.terrain, Bush):
+                    cell.terrain.tick()
+
         for entity in self.entities[:]:
             entity.act(self)
+
         self.handle_events()
+        self.render()
+        self.update_info()
+
+    def render(self):
+        self.canvas.delete("all")
+        for x in range(self.width):
+            for y in range(self.height):
+                cell = self.grid[x][y]
+                x1, y1 = x * CELL_SIZE, y * CELL_SIZE
+                x2, y2 = x1 + CELL_SIZE, y1 + CELL_SIZE
+                color = "white"
+                if cell.entities:
+                    color = "red"
+                elif isinstance(cell.terrain, Grass):
+                    color = "green"
+                elif isinstance(cell.terrain, Bush):
+                    color = "darkgreen"
+                elif isinstance(cell.terrain, Tree):
+                    color = "brown"
+                elif isinstance(cell.terrain, Water):
+                    color = "blue"
+                elif isinstance(cell.terrain, Rock):
+                    color = "gray"
+                self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black")
+
+    def update_info(self):
+        info_lines = [f"Tick: {self.ticks}\n"]
+        for i, entity in enumerate(self.entities):
+            info_lines.append(f"Существо {i+1}: HP={entity.hp}, Возраст={entity.age}, Голод={entity.hunger}, Жажда={entity.thirst}, Инвентарь={entity.inventory}\n")
+        info_lines += self.messages[-5:]
+        self.info_text.delete("1.0", tk.END)
+        self.info_text.insert(tk.END, "".join(info_lines))
 
     def handle_events(self):
         if random.random() < 0.01:
             x, y = random.randint(0, 19), random.randint(0, 19)
-            print(f"\n🔥 Fire starts at ({x},{y})!")
+            self.messages.append(f"🔥 Пожар в клетке ({x},{y})\n")
         if random.random() < 0.05:
-            print("\n🌧 Rain event")
+            self.messages.append("🌧 Идёт дождь\n")
             for _ in range(5):
                 x, y = random.randint(0, 19), random.randint(0, 19)
                 self.grid[y][x].terrain = random.choice([Grass(), Bush(), Water()])
         if random.random() < 0.05:
             x, y = random.randint(0, 19), random.randint(0, 19)
-            print(f"\n☄️ Meteor hits ({x},{y})!")
             self.grid[y][x].terrain = Rock()
+            self.messages.append(f"☄️ Метеорит ударил в ({x},{y})\n")
 
 # === 2. Рецепты ===
 class Recipes:
@@ -71,8 +114,11 @@ class Entity:
         self.hunger += 6
         self.thirst += 3
         if self.hunger >= 100 or self.thirst >= 100 or self.age >= self.max_age:
+            try:
+                world.grid[self.x][self.y].entities.remove(self)
+            except  ValueError:
+                pass
             world.entities.remove(self)
-            world.grid[self.y][self.x].entities.remove(self)
             return
 
         if self.hunger > 70:
@@ -89,10 +135,9 @@ class Entity:
     def move(self, dx, dy, world):
         new_x = max(0, min(world.width - 1, self.x + dx))
         new_y = max(0, min(world.height - 1, self.y + dy))
-        if self in world.grid[self.y][self.x].entities:
-            world.grid[self.y][self.x].entities.remove(self)
+        world.grid[self.x][self.y].entities.remove(self)
         self.x, self.y = new_x, new_y
-        world.grid[self.y][self.x].entities.append(self)
+        world.grid[self.x][self.y].entities.append(self)
 
     def eat(self):
         for i, item in enumerate(self.inventory):
@@ -139,50 +184,28 @@ class Rock:
     name = "камень"
     symbol = "r"
 
-# === 6. Графическая отрисовка ===
-class WorldGUI:
-    def __init__(self, world):
-        self.world = world
-        self.root = tk.Tk()
-        self.canvas = tk.Canvas(self.root, width=world.width * CELL_SIZE, height=world.height * CELL_SIZE)
-        self.canvas.pack()
+# === 6. GUI и запуск ===
+def main():
+    root = tk.Tk()
+    root.title("Life Simulator")
 
-    def draw(self):
-        self.canvas.delete("all")
-        for y in range(self.world.height):
-            for x in range(self.world.width):
-                terrain = self.world.grid[y][x].terrain
-                fill = "white"
-                if terrain:
-                    fill = {
-                        "трава": "lightgreen",
-                        "куст": "green",
-                        "дерево": "darkgreen",
-                        "вода": "blue",
-                        "камень": "gray"
-                    }.get(terrain.name, "white")
-                if self.world.grid[y][x].entities:
-                    fill = "red"
-                self.canvas.create_rectangle(x * CELL_SIZE, y * CELL_SIZE,
-                                             (x+1) * CELL_SIZE, (y+1) * CELL_SIZE,
-                                             fill=fill, outline="black")
-        self.root.update()
+    canvas = tk.Canvas(root, width=WIDTH*CELL_SIZE, height=HEIGHT*CELL_SIZE)
+    canvas.pack()
 
-    def run(self):
-        def loop():
-            self.world.tick()
-            self.draw()
-            self.root.after(1000, loop)
+    info_text = tk.Text(root, height=10)
+    info_text.pack()
 
-        loop()
-        self.root.mainloop()
-
-# === 7. Запуск ===
-if __name__ == "__main__":
-    world = World()
+    world = World(canvas, info_text)
     ent = Entity(10, 10)
     world.entities.append(ent)
     world.grid[10][10].entities.append(ent)
 
-    gui = WorldGUI(world)
-    gui.run()
+    def update():
+        world.tick()
+        root.after(1000, update)
+
+    update()
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
